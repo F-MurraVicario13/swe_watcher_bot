@@ -1,0 +1,27 @@
+[Unit]
+Description=jobwatch Discord bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=jobwatch
+Group=jobwatch
+WorkingDirectory=/opt/jobwatch
+EnvironmentFile=/opt/jobwatch/.env
+ExecStart=/opt/jobwatch/venv/bin/python /opt/jobwatch/bot.py
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=jobwatch
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/opt/jobwatch
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target
