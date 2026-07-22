@@ -100,6 +100,28 @@ Once the bot is online, use `/faang` or `/quant` in a server channel to see
 the five newest matching listings from that source tier. Discord slash-command
 registration can take a few minutes to appear globally after the bot starts.
 
+## Running with Docker
+
+```bash
+cp .env.example .env
+# edit .env and fill in DISCORD_TOKEN and DISCORD_CHANNEL_ID
+docker compose up -d --build
+```
+
+This builds the image, starts the bot in the background, and stores the
+SQLite dedup database in a named volume (`jobwatch-data`) mounted at
+`/app/data`, so `seen.db` survives container rebuilds/restarts. The compose
+file forces `DB_PATH=/app/data/seen.db` regardless of what's in `.env`.
+
+Useful commands:
+
+```bash
+docker compose logs -f      # follow logs
+docker compose restart      # restart the bot
+docker compose down         # stop (keeps the volume/data)
+docker compose down -v      # stop and delete the dedup database too
+```
+
 ## Deploying with systemd
 
 ```bash
@@ -132,6 +154,9 @@ journalctl -u jobwatch -f
 | `requirements.txt` | Python dependencies |
 | `.env.example` | Template for local/production config |
 | `jobwatch.service` | systemd unit for deployment |
+| `Dockerfile` | Container image definition |
+| `docker-compose.yml` | Compose service + persistent volume for `seen.db` |
+| `.dockerignore` | Excludes `venv/`, `.git/`, `.env`, etc. from the build context |
 | `.gitignore` | Excludes `.env`, `seen.db`, `venv/` |
 
 ## Security notes

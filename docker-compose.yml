@@ -1,0 +1,16 @@
+services:
+  jobwatch:
+    build: .
+    container_name: jobwatch
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Overrides any DB_PATH in .env so dedup state lands in the
+      # persisted volume regardless of local (non-Docker) config.
+      DB_PATH: /app/data/seen.db
+    volumes:
+      - jobwatch-data:/app/data
+
+volumes:
+  jobwatch-data:
