@@ -430,7 +430,11 @@ class JobWatchClient(discord.Client):
         try:
             data = json.loads(body)
         except ValueError:
-            data = _parse_markdown_listings(body, fetch_url)
+            try:
+                data = _parse_markdown_listings(body, fetch_url)
+            except Exception as exc:
+                log.warning("Failed to parse listings markdown from %s: %s", LISTINGS_URL, exc)
+                return None
 
         if not isinstance(data, list):
             log.warning("Unexpected listings payload shape (expected a list): %r", type(data))
@@ -442,36 +446,60 @@ class JobWatchClient(discord.Client):
         self, interaction: discord.Interaction, tier_name: str
     ) -> None:
         """Reply to a slash command with the newest listings in one source tier."""
-        await interaction.response.defer(thinking=True)
-        roles = await self.fetch_listings()
-        if roles is None:
-            await interaction.followup.send(
-                "I couldn't load the listings right now. Please try again shortly.",
-                ephemeral=True,
-            )
-            return
-
-        matching_roles = [
-            role
-            for role in roles
-            if role.get("tier") == tier_name
-            and role.get("active") is not False
-            and role.get("is_visible") is not False
-            and passes_filters(role)
-        ]
-        newest = sorted(matching_roles, key=_role_sort_key, reverse=True)[:TIER_COMMAND_LIMIT]
-        if not newest:
-            await interaction.followup.send(
-                f"No current {tier_name} listings match this bot's filters.",
-                ephemeral=True,
-            )
-            return
-
-        await interaction.followup.send(
-            f"Newest {tier_name} listings ({len(newest)}):"
+        log.info(
+            "SLASH_COMMAND received: /%s from %s (interaction id %s)",
+            tier_name.lower(),
+            interaction.user,
+            interaction.id,
         )
-        for role in newest:
-            await interaction.followup.send(embed=build_embed(role))
+        try:
+            await interaction.response.defer(thinking=True)
+        except Exception:
+            log.exception(
+                "SLASH_COMMAND defer failed for /%s (interaction id %s); "
+                "Discord likely already expired this interaction",
+                tier_name.lower(),
+                interaction.id,
+            )
+            return
+
+        try:
+            roles = await self.fetch_listings()
+            if roles is None:
+                await interaction.followup.send(
+                    "I couldn't load the listings right now. Please try again shortly.",
+                    ephemeral=True,
+                )
+                return
+
+            matching_roles = [
+                role
+                for role in roles
+                if role.get("tier") == tier_name
+                and role.get("active") is not False
+                and role.get("is_visible") is not False
+                and passes_filters(role)
+            ]
+            newest = sorted(matching_roles, key=_role_sort_key, reverse=True)[:TIER_COMMAND_LIMIT]
+            if not newest:
+                await interaction.followup.send(
+                    f"No current {tier_name} listings match this bot's filters.",
+                    ephemeral=True,
+                )
+                return
+
+            await interaction.followup.send(
+                f"Newest {tier_name} listings ({len(newest)}):"
+            )
+            for role in newest:
+                await interaction.followup.send(embed=build_embed(role))
+            log.info("SLASH_COMMAND /%s completed: %d posted", tier_name.lower(), len(newest))
+        except Exception:
+            log.exception(
+                "SLASH_COMMAND /%s failed after defer (interaction id %s)",
+                tier_name.lower(),
+                interaction.id,
+            )
 
     async def faang(self, interaction: discord.Interaction) -> None:
         await self.send_tier_listings(interaction, "FAANG+")
@@ -481,6 +509,15 @@ class JobWatchClient(discord.Client):
 
     @tasks.loop(minutes=30)
     async def poll_listings(self) -> None:
+        try:
+            await self._poll_listings_once()
+        except Exception:
+            # discord.ext.tasks only auto-retries a narrow set of network/gateway
+            # exceptions; anything else re-raises and permanently stops this loop.
+            # Catch broadly here so one bad cycle can't kill alerting until restart.
+            log.exception("poll_listings cycle failed; will retry next cycle")
+
+    async def _poll_listings_once(self) -> None:
         roles = await self.fetch_listings()
         if roles is None:
             return
