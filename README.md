@@ -1,22 +1,37 @@
 # jobwatch
 
-A self-hosted Discord bot that watches a SimplifyJobs-style `listings.json` feed
-and posts newly-added, active roles to a Discord channel as embeds.
+A self-hosted Discord bot that watches a JSON feed or the SpeedyApply Markdown
+job repository and posts newly-added, active roles to a Discord channel as
+embeds.
 
 ## How it works
 
-- A `tasks.loop` polls `LISTINGS_URL` every `POLL_MINUTES` minutes.
+- A `tasks.loop` polls `LISTINGS_URL` every `POLL_MINUTES` minutes. GitHub
+  repository URLs are resolved to the repository's current `README.md` table;
+  JSON feeds remain supported.
 - Each role's `id` is diffed against a SQLite table of previously-seen IDs.
 - **Cold start**: on the very first poll, the feed already contains thousands
-  of roles. All of their IDs are recorded silently (no posts), and a
-  `meta.seeded` flag is set. Only roles that appear in *later* polls get
-  alerted.
+  of roles. All of their IDs are recorded, and the bot posts up to
+  `BOOTSTRAP_POST_LIMIT` qualifying roles once as a smoke test. After that it
+  sets a `meta.bootstrap_done` flag and only roles that appear in *later* polls
+  get alerted.
+- If `INTERNSHIPS_ONLY=true`, the bot keeps only listings that look like
+  internships or co-ops and excludes obvious full-time roles.
+- `BOOTSTRAP_POST_LIMIT` controls how many newest qualifying roles are posted
+  on the first startup.
+- If `LISTINGS_URL` changes, the bot treats the new feed as a bootstrap and
+  applies the same limit; listings already stored in its database are never
+  posted again.
+- If `MIN_DATE_POSTED` is set, listings older than that timestamp are skipped.
 - An ID is recorded as seen *before* the bot attempts to post it, so a crash
   mid-post can never cause a duplicate alert on the next run.
 - Roles with `active: false` or `is_visible: false` are skipped.
 - Posts are throttled to ~1/second to stay well under Discord rate limits.
 - A failed fetch (network error, bad JSON, unexpected shape) logs a warning
   and is retried on the next cycle — it never crashes the loop.
+- The `/faang` and `/quant` slash commands fetch the source on demand and show
+  the five newest listings from those respective tiers. They honor the same
+  filters configured for alerts.
 
 ## Requirements
 
@@ -53,9 +68,12 @@ directly, or from the systemd `EnvironmentFile` in production).
 |---|---|---|---|
 | `DISCORD_TOKEN` | yes | — | Bot token from the Discord Developer Portal |
 | `DISCORD_CHANNEL_ID` | yes | — | Channel ID to post role alerts to |
-| `LISTINGS_URL` | no | SimplifyJobs New-Grad-Positions `listings.json` | Source feed URL |
+| `LISTINGS_URL` | no | `https://github.com/speedyapply/2027-SWE-College-Jobs` | GitHub repository or JSON/Markdown source URL |
 | `POLL_MINUTES` | no | `30` | Minutes between polls |
 | `DB_PATH` | no | `seen.db` | SQLite file for dedup state |
+| `BOOTSTRAP_POST_LIMIT` | no | `3` | On the first startup, post up to this many newest qualifying roles; set to `0` to disable |
+| `INTERNSHIPS_ONLY` | no | `true` | If `true`, only keep listings that look like internships or co-ops |
+| `MIN_DATE_POSTED` | no | (blank) | Skip listings older than this timestamp; use ISO 8601 or Unix seconds |
 | `TITLE_KEYWORDS` | no | (none) | Comma-separated substrings; only alert if the title contains one |
 | `LOCATIONS` | no | (none) | Comma-separated substrings; only alert if a location contains one |
 | `SPONSORSHIP_ONLY` | no | `false` | If `true`, skip roles that require citizenship or explicitly offer no sponsorship |
@@ -77,6 +95,10 @@ to disable it.
 6. Enable **Developer Mode** in Discord (User Settings → Advanced), then
    right-click the target channel → **Copy Channel ID** → paste into
    `DISCORD_CHANNEL_ID`.
+
+Once the bot is online, use `/faang` or `/quant` in a server channel to see
+the five newest matching listings from that source tier. Discord slash-command
+registration can take a few minutes to appear globally after the bot starts.
 
 ## Deploying with systemd
 
